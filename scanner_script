@@ -1,0 +1,80 @@
+#fver. 1
+
+import vt
+import time
+import hashlib
+import os
+from urllib.parse import urlparse
+import re
+
+client = vt.Client("YOUR_VIRUSTOTAL_API_KEY")
+
+def scanFile(fPath):
+    # with open does not execute file contents
+    with open(fPath, "rb") as f:
+      #read file contents
+      file_content = f.read()
+      #create hash based on file contents
+      sha256_hash = hashlib.sha256(file_content).hexdigest()
+
+      try:
+        start_time = time.time()  
+        #search for match within virustotal db
+        file_report = client.get_object("/files/{}", sha256_hash)
+        print("file was found within virustotal db")
+        print(file_report.last_analysis_stats);
+
+      #if not found within db, scan
+      except vt.error.APIError as e:
+        print("file was not found within virustotal db, printing scan results: ")
+        analysis = client.scan_file(f, wait_for_completion = True)
+        print(analysis.stats)
+
+      end_time = time.time()
+      print("Scan took {:.2f} seconds".format(end_time-start_time))
+      return (end_time-start_time)
+
+def scanDirectory(directory):
+    totalTime = 0
+    numFiles = 0
+    for root, _, files in os.walk(directory):
+        for filename in files:
+            filepath = os.path.join(root, filename)
+            print(filepath)
+            totalTime += scanFile(filepath)
+            numFiles+=1
+            print("\n")
+    return totalTime, numFiles
+
+def scanUrl(string):
+    try:
+        url_id = vt.url_id(string)
+        url = client.get_object("/urls/{}", url_id)
+        print("URL was found within virustotal db")
+        print(url.last_analysis_stats)
+    except vt.error.APIError as e:
+        print("URL was not found within virustotal db, printing scan results: ")
+        analysis = client.scan_url(string, wait_for_completion = True)
+        print(analysis.stats)
+
+def isUrl(string):
+    regex = r"^(https?://)?(www\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/[\w.-]*)*$"
+    return re.match(regex, string) is not None
+            
+if __name__ == "__main__":
+    # NOTES: found that cannot detect malicious content within .rar, .dll,  files. 
+    fPath = 'bafkreie4oaslbn65agmypbbfyrdoehfntvgx3axy66cki75rf4bfyxxzfu.ipfs.cf-ipfs.com'
+    num = 1
+    if os.path.exists(fPath):
+        if os.path.isfile(fPath) or os.path.isdir(fPath): 
+            totalTime, num = scanDirectory(fPath)
+    elif isUrl(fPath):
+        parsedUrl = urlparse(fPath)
+        if parsedUrl.scheme: # If URL contains scheme (ex. https, http, ftp)
+            # Reconstruct the URL without the scheme
+            fPath = parsedUrl.netloc
+        start_time = time.time()
+        scanUrl(fPath)
+        totalTime = time.time()-start_time
+    print("total time: {:.2f} seconds".format(totalTime))
+    print("average time: {:.2f} seconds".format((totalTime/num)))
